@@ -9,7 +9,7 @@ authors = ["Paul van der Meijs"]
 
 [dependencies]
 chrono = "0.4.26"
-git2 = "0.17.2"
+git2 = "0.18.0"
 lsp-server = "0.7.2"
 lsp-types = "0.94.0"
 serde = { version = "1.0.181", features = ["derive"] }

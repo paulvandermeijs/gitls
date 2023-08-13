@@ -93,44 +93,33 @@ where
 }
 
 fn get_blame_text(params: &HoverParams) -> Result<String, String> {
-    let repository = git2::Repository::discover(
-        params
-            .text_document_position_params
-            .text_document
-            .uri
-            .path(),
-    )
-    .map_err(|e| e.message().to_string())?;
-
+    let path = params
+        .text_document_position_params
+        .text_document
+        .uri
+        .path();
+    let repository = git2::Repository::discover(path).map_err(|e| e.message().to_string())?;
+    let buffer = std::fs::read_to_string(path).unwrap();
     let base = repository.workdir().unwrap().to_str().unwrap();
-
-    // TODO: Use `git_blame_buffer` to include file changes
     let blame = repository
         .blame_file(
-            Path::new(
-                params
-                    .text_document_position_params
-                    .text_document
-                    .uri
-                    .path(),
-            )
-            .strip_prefix(base)
-            .map_err(|e| e.to_string())?,
+            Path::new(path)
+                .strip_prefix(base)
+                .map_err(|e| e.to_string())?,
             None,
         )
         .map_err(|e| e.message().to_string())?;
+    let blame = blame.blame_buffer(buffer.as_bytes()).unwrap();
 
-    let lineno: usize = params
-        .text_document_position_params
-        .position
-        .line
-        .try_into()
-        .unwrap();
+    let lineno = params.text_document_position_params.position.line;
     let lineno = lineno + 1;
 
-    let line = blame
-        .get_line(lineno)
-        .ok_or("Failed to get line from blame")?;
+    let line = get_hunk_for_line(&blame, lineno.try_into().unwrap())
+        .map_err(|_| "Failed to get line from blame")?;
+
+    if line.final_commit_id().is_zero() {
+        return Ok("Uncommitted changes".to_string());
+    }
 
     let commit = repository
         .find_commit(line.final_commit_id())
@@ -146,8 +135,24 @@ fn get_blame_text(params: &HoverParams) -> Result<String, String> {
         "{} {}: {}",
         commit.author().name().unwrap(),
         date_time,
-        commit.message().unwrap()
+        commit.message().unwrap(),
     ))
+}
+
+fn get_hunk_for_line<'a>(
+    blame: &'a git2::Blame<'a>,
+    line: usize,
+) -> Result<git2::BlameHunk<'a>, Box<dyn std::error::Error>> {
+    let mut current_line = 1;
+    for hunk in blame.iter() {
+        current_line += hunk.lines_in_hunk();
+
+        if line < current_line {
+            return Ok(hunk);
+        }
+    }
+
+    Err("Line not found".into())
 }
 
 #[cfg(test)]
