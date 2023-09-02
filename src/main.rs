@@ -1,18 +1,15 @@
-use std::error::Error;
-use std::path::Path;
+mod message_state;
+mod handlers {
+    pub(crate) mod notification;
+    pub(crate) mod request;
+}
 
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use lsp_types::{
-    request::HoverRequest, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    MarkupContent, ServerCapabilities,
-};
+use lsp_server::{Connection, Message};
+use lsp_types::{HoverProviderCapability, InitializeParams, ServerCapabilities};
 
-use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+use crate::message_state::MessageState;
 
-fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
-    // Note that  we must have our logging only write out to stderr.
-    eprintln!("starting generic LSP server");
-
+fn main() -> anyhow::Result<()> {
     // Create the transport. Includes the stdio (stdin and stdout) versions but this could
     // also be implemented to use sockets or HTTP.
     let (connection, io_threads) = Connection::stdio();
@@ -28,161 +25,43 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     main_loop(connection, initialization_params)?;
     io_threads.join()?;
 
-    // Shut down gracefully.
-    eprintln!("shutting down server");
     Ok(())
 }
 
-fn main_loop(
-    connection: Connection,
-    params: serde_json::Value,
-) -> Result<(), Box<dyn Error + Sync + Send>> {
+fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Result<()> {
     let _params: InitializeParams = serde_json::from_value(params).unwrap();
-    eprintln!("starting example main loop");
     for msg in &connection.receiver {
-        eprintln!("got msg: {msg:?}");
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                eprintln!("got request: {req:?}");
-                match cast::<HoverRequest>(req) {
-                    Ok((id, params)) => {
-                        eprintln!("got gotoDefinition request #{id}: {params:?}");
-                        if let Ok(blame_text) = get_blame_text(&params) {
-                            let hover = Hover {
-                                contents: lsp_types::HoverContents::Markup(MarkupContent {
-                                    kind: lsp_types::MarkupKind::Markdown,
-                                    value: blame_text,
-                                }),
-                                range: None,
-                            };
-                            let result = Some(hover);
-                            let result = serde_json::to_value(&result).unwrap();
-                            let response = Response {
-                                id,
-                                result: Some(result),
-                                error: None,
-                            };
-                            connection.sender.send(Message::Response(response))?;
-                        }
-                        continue;
-                    }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(req)) => req,
-                };
-            }
-            Message::Response(resp) => {
-                eprintln!("got response: {resp:?}");
+
+                use handlers::request as handlers;
+                use lsp_types::request as reqs;
+
+                let state = MessageState::Unhandled(req)
+                    .handle::<reqs::HoverRequest, _>(handlers::handle_hover)?;
+
+                if let MessageState::Handled(Some(response)) = state {
+                    connection.sender.send(Message::Response(response))?;
+                } else if let MessageState::Unhandled(req) = state {
+                    eprintln!("Unhandled request: {req:?}");
+                }
             }
             Message::Notification(not) => {
-                eprintln!("got notification: {not:?}");
+                use handlers::notification as handlers;
+                use lsp_types::notification as nots;
+
+                let state = MessageState::Unhandled(not)
+                    .handle::<nots::DidOpenTextDocument, _>(handlers::did_open_text_document)?;
+
+                if let MessageState::Unhandled(not) = state {
+                    eprintln!("Unhandled notification: {not:?}");
+                }
             }
+            Message::Response(_resp) => (),
         }
     }
     Ok(())
-}
-
-fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
-where
-    R: lsp_types::request::Request,
-    R::Params: serde::de::DeserializeOwned,
-{
-    req.extract(R::METHOD)
-}
-
-fn get_blame_text(params: &HoverParams) -> Result<String, String> {
-    let path = params
-        .text_document_position_params
-        .text_document
-        .uri
-        .path();
-    let repository = git2::Repository::discover(path).map_err(|e| e.message().to_string())?;
-    let buffer = std::fs::read_to_string(path).unwrap();
-    let base = repository.workdir().unwrap().to_str().unwrap();
-    let blame = repository
-        .blame_file(
-            Path::new(path)
-                .strip_prefix(base)
-                .map_err(|e| e.to_string())?,
-            None,
-        )
-        .map_err(|e| e.message().to_string())?;
-    let blame = blame.blame_buffer(buffer.as_bytes()).unwrap();
-
-    let lineno = params.text_document_position_params.position.line;
-    let lineno = lineno + 1;
-
-    let line = get_hunk_for_line(&blame, lineno.try_into().unwrap())
-        .map_err(|_| "Failed to get line from blame")?;
-
-    if line.final_commit_id().is_zero() {
-        return Ok("Uncommitted changes".to_string());
-    }
-
-    let commit = repository
-        .find_commit(line.final_commit_id())
-        .map_err(|e| e.message().to_string())?;
-
-    let date_time = DateTime::<Utc>::from_utc(
-        NaiveDateTime::from_timestamp_opt(commit.time().seconds(), 0).unwrap(),
-        Utc,
-    );
-    let date_time = date_time.with_timezone(&Local);
-
-    Ok(format!(
-        "{} {}: {}",
-        commit.author().name().unwrap(),
-        date_time,
-        commit.message().unwrap(),
-    ))
-}
-
-fn get_hunk_for_line<'a>(
-    blame: &'a git2::Blame<'a>,
-    line: usize,
-) -> Result<git2::BlameHunk<'a>, Box<dyn std::error::Error>> {
-    let mut current_line = 1;
-    for hunk in blame.iter() {
-        current_line += hunk.lines_in_hunk();
-
-        if line < current_line {
-            return Ok(hunk);
-        }
-    }
-
-    Err("Line not found".into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lsp_types::Url;
-
-    #[test]
-    fn it_works() {
-        let hover_params = lsp_types::HoverParams {
-            text_document_position_params: lsp_types::TextDocumentPositionParams {
-                text_document: lsp_types::TextDocumentIdentifier {
-                    uri: Url::parse(&format!(
-                        "file://{}/README.md",
-                        std::env::current_dir().unwrap().to_str().unwrap()
-                    ))
-                    .unwrap(),
-                },
-                position: lsp_types::Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
-            work_done_progress_params: lsp_types::WorkDoneProgressParams {
-                work_done_token: None,
-            },
-        };
-
-        let result = get_blame_text(&hover_params);
-
-        assert!(result.is_ok());
-    }
 }
