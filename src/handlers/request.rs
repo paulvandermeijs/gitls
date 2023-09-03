@@ -4,38 +4,47 @@ use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use lsp_server::{RequestId, Response};
 
-pub(crate) fn handle_hover(
-    id: RequestId,
-    params: lsp_types::HoverParams,
-) -> Result<Option<Response>> {
-    let blame_text = get_blame_text(&params)?;
-    use lsp_types::{MarkupContent, MarkupKind::Markdown};
-    let hover = lsp_types::Hover {
-        contents: lsp_types::HoverContents::Markup(MarkupContent {
-            kind: Markdown,
+pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
+    fs: &FS,
+) -> impl FnOnce(RequestId, lsp_types::HoverParams) -> Result<Option<Response>> + '_ {
+    |id, params| {
+        let Ok(blame_text) = get_blame_text(fs, &params) else {
+            return Ok(None);
+        };
+        use lsp_types::{MarkupContent, MarkupKind::Markdown};
+        let hover = lsp_types::Hover {
+            contents: lsp_types::HoverContents::Markup(MarkupContent {
+                kind: Markdown,
 
-            value: blame_text,
-        }),
-        range: None,
-    };
-    let result = Some(hover);
-    let result = serde_json::to_value(&result).unwrap();
-    let response = Response {
-        id,
-        result: Some(result),
-        error: None,
-    };
-    Ok(Some(response))
+                value: blame_text,
+            }),
+            range: None,
+        };
+        let result = Some(hover);
+        let result = serde_json::to_value(&result).unwrap();
+        let response = Response {
+            id,
+            result: Some(result),
+            error: None,
+        };
+        Ok(Some(response))
+    }
 }
 
-fn get_blame_text(params: &lsp_types::HoverParams) -> anyhow::Result<String> {
+fn get_blame_text<FS: vfs::FileSystem>(
+    fs: &FS,
+    params: &lsp_types::HoverParams,
+) -> anyhow::Result<String> {
     let path = params
         .text_document_position_params
         .text_document
         .uri
         .path();
     let repository = git2::Repository::discover(path)?;
-    let buffer = std::fs::read_to_string(path).unwrap();
+    let mut buffer = String::new();
+
+    fs.open_file(path)?.read_to_string(&mut buffer)?;
+
     let base = repository.workdir().unwrap().to_str().unwrap();
     let blame = repository.blame_file(Path::new(path).strip_prefix(base)?, None)?;
     let blame = blame.blame_buffer(buffer.as_bytes()).unwrap();
@@ -89,6 +98,7 @@ mod tests {
 
     #[test]
     fn it_works() {
+        let fs = vfs::PhysicalFS::new("/");
         let hover_params = lsp_types::HoverParams {
             text_document_position_params: lsp_types::TextDocumentPositionParams {
                 text_document: lsp_types::TextDocumentIdentifier {
@@ -108,7 +118,7 @@ mod tests {
             },
         };
 
-        let result = get_blame_text(&hover_params);
+        let result = get_blame_text(&fs, &hover_params);
 
         assert!(result.is_ok());
     }

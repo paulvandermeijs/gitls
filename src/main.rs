@@ -5,7 +5,11 @@ mod handlers {
 }
 
 use lsp_server::{Connection, Message};
-use lsp_types::{HoverProviderCapability, InitializeParams, ServerCapabilities};
+use lsp_types::{
+    HoverProviderCapability, InitializeParams, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind,
+};
+use vfs::{FileSystem, MemoryFS, OverlayFS, PhysicalFS, VfsPath};
 
 use crate::message_state::MessageState;
 
@@ -16,19 +20,29 @@ fn main() -> anyhow::Result<()> {
 
     // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
     let hover_provider = Some(HoverProviderCapability::Simple(true));
+    let text_document_sync = Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL));
     let server_capabilities = serde_json::to_value(&ServerCapabilities {
         hover_provider,
+        text_document_sync,
         ..Default::default()
     })
     .unwrap();
     let initialization_params = connection.initialize(server_capabilities)?;
-    main_loop(connection, initialization_params)?;
+    let fs = OverlayFS::new(&[
+        VfsPath::new(MemoryFS::new()),
+        VfsPath::new(PhysicalFS::new("/")),
+    ]);
+    main_loop(connection, initialization_params, fs)?;
     io_threads.join()?;
 
     Ok(())
 }
 
-fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Result<()> {
+fn main_loop<FS: FileSystem>(
+    connection: Connection,
+    params: serde_json::Value,
+    fs: FS,
+) -> anyhow::Result<()> {
     let _params: InitializeParams = serde_json::from_value(params).unwrap();
     for msg in &connection.receiver {
         match msg {
@@ -41,7 +55,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                 use lsp_types::request as reqs;
 
                 let state = MessageState::Unhandled(req)
-                    .handle::<reqs::HoverRequest, _>(handlers::handle_hover)?;
+                    .handle::<reqs::HoverRequest, _>(handlers::handle_hover_builder(&fs))?;
 
                 if let MessageState::Handled(Some(response)) = state {
                     connection.sender.send(Message::Response(response))?;
@@ -54,7 +68,12 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                 use lsp_types::notification as nots;
 
                 let state = MessageState::Unhandled(not)
-                    .handle::<nots::DidOpenTextDocument, _>(handlers::did_open_text_document)?;
+                    .handle::<nots::DidOpenTextDocument, _>(
+                        handlers::did_open_text_document_builder(&fs),
+                    )?
+                    .handle::<nots::DidChangeTextDocument, _>(
+                        handlers::did_change_text_document_builder(&fs),
+                    )?;
 
                 if let MessageState::Unhandled(not) = state {
                     eprintln!("Unhandled notification: {not:?}");
