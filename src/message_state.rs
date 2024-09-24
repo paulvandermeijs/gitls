@@ -1,11 +1,20 @@
+//! # Message State
+//!
+//! Message state is used to represent handled or unhandled notifications and
+//! requests.
+
 use anyhow::Result;
 
 pub(crate) enum MessageState<I, O> {
+    /// Unhandled state with input `I`.
     Unhandled(I),
+    /// Handled state with output `O`.
     Handled(O),
 }
 
+/// Message state for notifications.
 impl MessageState<lsp_server::Notification, ()> {
+    /// Apply `handler` if params match notification type `N`.
     pub fn handle<N, F>(self, handler: F) -> Result<Self>
     where
         N: lsp_types::notification::Notification,
@@ -26,7 +35,9 @@ impl MessageState<lsp_server::Notification, ()> {
     }
 }
 
+/// Message state for requests.
 impl MessageState<lsp_server::Request, lsp_server::Response> {
+    /// Apply `handler` if params match request type `R`.
     pub fn handle<R, F>(self, handler: F) -> Result<Self>
     where
         R: lsp_types::request::Request,

@@ -1,5 +1,8 @@
+//! Handlers for notifications.
+
 use anyhow::Result;
 
+/// Create handler for did open text document notification.
 pub(crate) fn did_open_text_document_builder<FS: vfs::FileSystem>(
     fs: &FS,
 ) -> impl FnOnce(lsp_types::DidOpenTextDocumentParams) -> Result<()> + '_ {
@@ -14,6 +17,7 @@ pub(crate) fn did_open_text_document_builder<FS: vfs::FileSystem>(
     }
 }
 
+/// Create handler for did change text document notification.
 pub(crate) fn did_change_text_document_builder<FS: vfs::FileSystem>(
     fs: &FS,
 ) -> impl FnOnce(lsp_types::DidChangeTextDocumentParams) -> Result<()> + '_ {

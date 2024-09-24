@@ -1,8 +1,11 @@
+//! Handlers for requests.
+
 use std::path::Path;
 
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 
+/// Create handler for hover request.
 pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
     fs: &FS,
 ) -> impl FnOnce(lsp_types::HoverParams) -> Result<Option<lsp_types::Hover>> + '_ {
@@ -23,6 +26,7 @@ pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
     }
 }
 
+/// Get formatted blame text for given `params`.
 fn get_blame_text<FS: vfs::FileSystem>(
     fs: &FS,
     params: &lsp_types::HoverParams,
@@ -67,6 +71,7 @@ fn get_blame_text<FS: vfs::FileSystem>(
     ))
 }
 
+/// Look up hunk from `blame` for given `line`.
 fn get_hunk_for_line<'a>(
     blame: &'a git2::Blame<'a>,
     line: usize,

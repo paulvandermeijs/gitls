@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Run the main loop.
 fn main_loop<FS: FileSystem>(
     connection: Connection,
     params: serde_json::Value,
