@@ -5,10 +5,6 @@ mod handlers {
 }
 
 use lsp_server::{Connection, Message};
-use lsp_types::{
-    HoverProviderCapability, InitializeParams, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
-};
 use vfs::{FileSystem, MemoryFS, OverlayFS, PhysicalFS, VfsPath};
 
 use crate::message_state::MessageState;
@@ -19,11 +15,26 @@ fn main() -> anyhow::Result<()> {
     let (connection, io_threads) = Connection::stdio();
 
     // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
+    use handlers::request::Command;
+    use lsp_types::{
+        CodeActionProviderCapability, ExecuteCommandOptions, HoverProviderCapability,
+        ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    };
     let hover_provider = Some(HoverProviderCapability::Simple(true));
     let text_document_sync = Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL));
+    let code_action_provider = Some(CodeActionProviderCapability::Simple(true));
+    let execute_command_provider = Some(ExecuteCommandOptions {
+        commands: vec![
+            Command::StageFile.to_str().to_string(),
+            Command::UnstageFile.to_str().to_string(),
+        ],
+        ..Default::default()
+    });
     let server_capabilities = serde_json::to_value(&ServerCapabilities {
         hover_provider,
         text_document_sync,
+        code_action_provider,
+        execute_command_provider,
         ..Default::default()
     })
     .unwrap();
@@ -44,7 +55,7 @@ fn main_loop<FS: FileSystem>(
     params: serde_json::Value,
     fs: FS,
 ) -> anyhow::Result<()> {
-    let _params: InitializeParams = serde_json::from_value(params).unwrap();
+    let _params: lsp_types::InitializeParams = serde_json::from_value(params).unwrap();
     for msg in &connection.receiver {
         match msg {
             Message::Request(req) => {
@@ -56,7 +67,9 @@ fn main_loop<FS: FileSystem>(
                 use lsp_types::request as reqs;
 
                 let state = MessageState::Unhandled(req)
-                    .handle::<reqs::HoverRequest, _>(handlers::handle_hover_builder(&fs))?;
+                    .handle::<reqs::HoverRequest, _>(handlers::handle_hover_builder(&fs))?
+                    .handle::<reqs::CodeActionRequest, _>(handlers::handle_code_action)?
+                    .handle::<reqs::ExecuteCommand, _>(handlers::handle_execute_command)?;
 
                 if let MessageState::Handled(response) = state {
                     connection.sender.send(Message::Response(response))?;
