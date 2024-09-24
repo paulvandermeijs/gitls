@@ -2,12 +2,11 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
-use lsp_server::{RequestId, Response};
 
 pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
     fs: &FS,
-) -> impl FnOnce(RequestId, lsp_types::HoverParams) -> Result<Option<Response>> + '_ {
-    |id, params| {
+) -> impl FnOnce(lsp_types::HoverParams) -> Result<Option<lsp_types::Hover>> + '_ {
+    |params| {
         let Ok(blame_text) = get_blame_text(fs, &params) else {
             return Ok(None);
         };
@@ -15,19 +14,12 @@ pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
         let hover = lsp_types::Hover {
             contents: lsp_types::HoverContents::Markup(MarkupContent {
                 kind: Markdown,
-
                 value: blame_text,
             }),
             range: None,
         };
-        let result = Some(hover);
-        let result = serde_json::to_value(&result).unwrap();
-        let response = Response {
-            id,
-            result: Some(result),
-            error: None,
-        };
-        Ok(Some(response))
+
+        Ok(Some(hover))
     }
 }
 

@@ -57,7 +57,7 @@ fn main_loop<FS: FileSystem>(
                 let state = MessageState::Unhandled(req)
                     .handle::<reqs::HoverRequest, _>(handlers::handle_hover_builder(&fs))?;
 
-                if let MessageState::Handled(Some(response)) = state {
+                if let MessageState::Handled(response) = state {
                     connection.sender.send(Message::Response(response))?;
                 } else if let MessageState::Unhandled(req) = state {
                     eprintln!("Unhandled request: {req:?}");

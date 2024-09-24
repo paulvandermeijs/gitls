@@ -26,18 +26,25 @@ impl MessageState<lsp_server::Notification, ()> {
     }
 }
 
-impl MessageState<lsp_server::Request, Option<lsp_server::Response>> {
+impl MessageState<lsp_server::Request, lsp_server::Response> {
     pub fn handle<R, F>(self, handler: F) -> Result<Self>
     where
         R: lsp_types::request::Request,
         R::Params: serde::de::DeserializeOwned,
-        F: FnOnce(lsp_server::RequestId, R::Params) -> Result<Option<lsp_server::Response>>,
+        F: FnOnce(R::Params) -> Result<R::Result>,
     {
         match self {
             Self::Unhandled(req) => {
                 if let Ok((id, params)) = req.clone().extract(R::METHOD) {
-                    let result = handler(id, params)?;
-                    return Ok(Self::Handled(result));
+                    let result = handler(params)?;
+                    let result = serde_json::to_value(&result).unwrap();
+                    let response = lsp_server::Response {
+                        id,
+                        result: Some(result),
+                        error: None,
+                    };
+
+                    return Ok(Self::Handled(response));
                 }
 
                 Ok(Self::Unhandled(req))
