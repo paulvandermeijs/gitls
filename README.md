@@ -14,11 +14,11 @@ to explore the usage of a language server for Git.
 | Feature        | Status      |
 | -------------- | ----------- |
 | Blame on hover | Implemented |
-| Stage file     | Implemented |
 
 ### Index
 
 | Feature    | Status          |
 | ---------- | --------------- |
-| Stage hunk | Not impelemnted |
+| Stage file | Implemented     |
+| Stage hunk | Not implemented |
 | Stage line | Not implemented |
