@@ -11,10 +11,10 @@ to explore the usage of a language server for Git.
 
 ### Blame
 
-| Feature        | Status            |
-| -------------- | ----------------- |
-| Blame on hover | Implemented       |
-| Stage file     | Under development |
+| Feature        | Status      |
+| -------------- | ----------- |
+| Blame on hover | Implemented |
+| Stage file     | Implemented |
 
 ### Index
 

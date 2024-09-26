@@ -185,8 +185,9 @@ pub(crate) fn handle_execute_command(
             index.add_path(rel_path)?;
         }
         Command::UnstageFile => {
-            // TODO: Completely removes the file from the index but should unstage
-            index.remove_path(rel_path)?
+            let head = repository.head()?;
+            let target = head.peel_to_commit()?;
+            repository.reset_default(Some(&target.into_object()), vec![rel_path])?;
         }
     }
 
