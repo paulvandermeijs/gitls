@@ -19,8 +19,10 @@ pub(crate) fn format_timestamp(timestamp: u64) -> String {
             0,
         )
         .unwrap();
+        let date_time = date_time.format("%v").to_string();
+        let date_time = date_time.trim().to_string();
 
-        date_time.format("%v").to_string()
+        date_time
     } else {
         let diff = Duration::new(diff.as_secs(), 0);
         let human_diff = format_duration(diff);
