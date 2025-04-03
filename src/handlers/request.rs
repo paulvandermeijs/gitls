@@ -1,9 +1,9 @@
 //! Handlers for requests.
 
+use anyhow::Result;
 use std::path::Path;
 
-use anyhow::Result;
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use crate::utils::blame::format_blame_text;
 
 /// Create handler for hover request.
 pub(crate) fn handle_hover_builder<FS: vfs::FileSystem>(
@@ -56,19 +56,9 @@ fn get_blame_text<FS: vfs::FileSystem>(
     }
 
     let commit = repository.find_commit(line.final_commit_id())?;
+    let blame_text = format_blame_text(commit);
 
-    let date_time = DateTime::<Utc>::from_utc(
-        NaiveDateTime::from_timestamp_opt(commit.time().seconds(), 0).unwrap(),
-        Utc,
-    );
-    let date_time = date_time.with_timezone(&Local);
-
-    Ok(format!(
-        "{} {}: {}",
-        commit.author().name().unwrap(),
-        date_time,
-        commit.message().unwrap(),
-    ))
+    Ok(blame_text)
 }
 
 /// Look up hunk from `blame` for given `line`.

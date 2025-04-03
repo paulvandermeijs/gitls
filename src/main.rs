@@ -3,6 +3,7 @@ mod handlers {
     pub(crate) mod notification;
     pub(crate) mod request;
 }
+mod utils;
 
 use lsp_server::{Connection, Message};
 use vfs::{FileSystem, MemoryFS, OverlayFS, PhysicalFS, VfsPath};
